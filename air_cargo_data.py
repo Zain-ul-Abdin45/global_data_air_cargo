@@ -631,4 +631,4 @@ with c3:
         st.dataframe(gb3, use_container_width=True, height=250)
 
 
-st.caption("Use Region→Country→Stage to validate coverage with Marcel, then filter by On-Radar and annotate Notes for follow-ups.")
+st.caption("Use Region→Country→Stage to validate coverage, then filter by On-Radar and annotate Notes for follow-ups.")
