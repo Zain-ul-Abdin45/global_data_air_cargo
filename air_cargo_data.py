@@ -33,7 +33,7 @@ SECTOR_COLUMNS = [
 
 STAGE_ORDER = [
     "Announced","Study","Planning","Pre-Design","Design","Pre-Tender","Tender","EPC Award",
-    "Execution","Renovation","On Hold","Completed","Canceled","Parent","Sub","Sub-Sub"
+    "Execution","Renovation","On Hold","Completed","Canceled"
 ]
 STAGE_RANK = {s:i for i,s in enumerate(STAGE_ORDER)}
 
