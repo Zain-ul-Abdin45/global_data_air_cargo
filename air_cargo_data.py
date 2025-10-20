@@ -297,7 +297,7 @@ def quick_slices(df_src: pd.DataFrame, title="Quick relevancy slices", height=25
             st.dataframe(gb3, use_container_width=True, height=height)
 
 # ---------------------------- Sidebar ----------------------------
-st.sidebar.title("⚙️ Controls")
+st.sidebar.title("Controls")
 
 uploaded = st.sidebar.file_uploader("Upload GlobalData export (CSV/XLSX)", type=["csv","xlsx","xls"])
 
@@ -329,7 +329,7 @@ on_radar_ids_text = st.sidebar.text_area(
 
 # Notes persistence
 st.sidebar.markdown("---")
-st.sidebar.caption("📝 Notes for projects")
+st.sidebar.caption("Notes for projects")
 notes_upload = st.sidebar.file_uploader("Import notes CSV (Ultimate_ProjectId,Notes)", type=["csv"], key="notes_upload")
 if "notes_map" not in st.session_state:
     st.session_state.notes_map = {}
@@ -386,13 +386,13 @@ st.caption("Matches columns are visible in **Match_Fields**; quick snippet in **
 
 # ---------------------------- Tabs ----------------------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📊 Group-by Explorer",
-    "🗺️ Map",
-    "📈 Time & Stages",
-    "🏗️ Owners / Funding",
-    "📃 Table, Notes & Export",
-    "ℹ️ Match Details",
-    "🧭 Lödige Relevancy"
+    "Group-by Explorer",
+    "Map",
+    "Time & Stages",
+    "Owners / Funding",
+    "Table, Notes & Export",
+    "Match Details",
+    "Lödige Relevancy"
 ])
 
 # ---- Tab 1: Group-by Explorer ----
