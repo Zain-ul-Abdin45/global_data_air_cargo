@@ -1,17 +1,26 @@
 # streamlit_app.py
-# GlobalData — Air Cargo radar & EDA (with keyword highlighter, dedupe, notes)
-# --------------------------------------------------------------------------------
+# GlobalData — Air Cargo radar with contextual "Quick relevancy slices"
+# ---------------------------------------------------------------
+# - File uploader (CSV/XLSX)
+# - Air Cargo filter + optional extra keyword
+# - Region/Country filter: Europe + Asia + six Arab countries
+# - Stage/value filters; de-duplication by Ultimate_ProjectId
+# - Keyword highlighter (Match_Fields / Match_Excerpt)
+# - Lödige relevancy scoring + top-N export
+# - Notes (import/export) in the table tab
+# - Contextual "Quick relevancy slices" per tab via quick_slices(df_src, ...)
+# ---------------------------------------------------------------
+
 import io
 import re
-import json
 import numpy as np
 import pandas as pd
 import altair as alt
 import streamlit as st
 
-st.set_page_config(page_title="GlobalData – Air Cargo Projects Radar", layout="wide")
+st.set_page_config(page_title="GlobalData – Air Cargo Projects Radar (Contextual Slices)", layout="wide")
 
-# ---------------------------- Config / Constants ----------------------------
+# ---------------------------- Constants ----------------------------
 ARAB_COUNTRIES = ["Saudi Arabia", "Oman", "United Arab Emirates", "Kuwait", "Qatar", "Bahrain"]
 ASIA_REGION_ALIASES = {"Asia", "Asia-Pacific"}
 EUROPE_REGION_ALIASES = {"Europe"}
@@ -22,15 +31,13 @@ SECTOR_COLUMNS = [
     "Project_Name","Project_Overview","Project_Scope","Project_Attributes","Project_Background"
 ]
 
-# Stage precedence for deduping: later index = more advanced
 STAGE_ORDER = [
     "Announced","Study","Planning","Pre-Design","Design","Pre-Tender","Tender","EPC Award",
     "Execution","Renovation","On Hold","Completed","Canceled","Parent","Sub","Sub-Sub"
 ]
 STAGE_RANK = {s:i for i,s in enumerate(STAGE_ORDER)}
 
-
-# ---- Lödige relevancy keywords (from public product pages) ----
+# ---- Lödige relevancy keywords ----
 LODIGE_KEYWORDS = {
     "ULD handling": [
         r"\bULD\b", r"\bunit load device", r"pallet(?:\s|-)and(?:\s|-)container",
@@ -46,29 +53,23 @@ LODIGE_KEYWORDS = {
         r"conveyor", r"sorter", r"diverter", r"tilt tray", r"merge", r"accumulation"
     ],
     "Automation & Control": [
-        r"inventory control system", r"ics\b", r"scada", r"plc", r"warehouse control system",
+        r"inventory control system", r"\bics\b", r"scada", r"\bplc\b", r"warehouse control system",
         r"\bwcs\b", r"warehouse management system", r"\bwms\b"
     ],
     "Vehicles & Robotics": [
         r"\bagv\b", r"automated guided vehicle", r"autonomous vehicle", r"transfer vehicle"
     ],
     "Air cargo terminal scope": [
-        r"cargo terminal", r"air cargo (hub|terminal|village)", r"cool chain", r"pharma",
+        r"cargo terminal", r"air cargo (?:hub|terminal|village)", r"cool chain", r"\bpharma\b",
         r"build(?:ing)? (?:unit|uld) storage", r"freight terminal"
-    ],
-    # (not scored, but kept for context): Lödige also does automated car parks/car lifts.
-    "Car park (context-only)": [r"automated parking", r"car lift", r"lorry lift"]
+    ]
 }
 
-# Stage weights: prioritize concrete opportunities
 LODIGE_STAGE_WEIGHT = {
-    #"Execution": 1.0, 
-    "EPC Award": 0.95, "Tender": 0.9, "Pre-Tender": 0.85,
+    "Execution": 1.0, "EPC Award": 0.95, "Tender": 0.9, "Pre-Tender": 0.85,
     "Design": 0.8, "Pre-Design": 0.75, "Planning": 0.7, "Study": 0.6,
-    "Announced": 0.55, "Renovation": 0.8
-    #, "On Hold": 0.2, "Completed": 0.1, "Canceled": 0.0
+    "Announced": 0.55, "Renovation": 0.8, "On Hold": 0.2, "Completed": 0.1, "Canceled": 0.0
 }
-
 
 # ---------------------------- Helpers ----------------------------
 def load_df(uploaded):
@@ -110,7 +111,6 @@ def ensure_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def find_matches_and_excerpt(row: pd.Series, base_pat, extra_pat=None, excerpt_len=120):
-    """Return (matched_cols, excerpt) for highlighting."""
     matched = []
     excerpt = ""
     for c in SECTOR_COLUMNS:
@@ -124,41 +124,33 @@ def find_matches_and_excerpt(row: pd.Series, base_pat, extra_pat=None, excerpt_l
                 if not m:
                     m = base_pat.search(text)
                 if m:
-                    s = max(0, m.start() - 40)
-                    e = min(len(text), m.end() + 80)
+                    s = max(0, m.start()-40); e = min(len(text), m.end()+80)
                     excerpt = text[s:e].replace("\n"," ")
     return ", ".join(matched), excerpt
 
 def air_cargo_mask_and_marks(df: pd.DataFrame, keywords: str = ""):
     df = df.copy()
-    present = [c for c in SECTOR_COLUMNS if c in df.columns]
     base_pat = re.compile(r"air\s*cargo", re.I)
     extra_pat = re.compile(re.escape(keywords), re.I) if keywords.strip() else None
 
-    # sector hit
     sector_hit = pd.Series(False, index=df.index)
-    for c in present:
+    for c in [col for col in SECTOR_COLUMNS if col in df.columns]:
         sector_hit = sector_hit | df[c].astype(str).str.contains(base_pat, na=False)
 
+    mask = sector_hit
     if extra_pat:
         kw_hit = pd.Series(False, index=df.index)
-        for c in present:
+        for c in [col for col in SECTOR_COLUMNS if col in df.columns]:
             kw_hit = kw_hit | df[c].astype(str).str.contains(extra_pat, na=False)
-        mask = sector_hit & kw_hit
-    else:
-        mask = sector_hit
+        mask = mask & kw_hit
 
-    # matched columns + excerpt
-    match_cols = []
-    excerpts = []
+    match_cols, excerpts = [], []
     for idx, row in df.iterrows():
         if mask.loc[idx]:
             mcols, ex = find_matches_and_excerpt(row, base_pat, extra_pat)
-            match_cols.append(mcols)
-            excerpts.append(ex)
+            match_cols.append(mcols); excerpts.append(ex)
         else:
-            match_cols.append("")
-            excerpts.append("")
+            match_cols.append(""); excerpts.append("")
     df["Match_Fields"] = match_cols
     df["Match_Excerpt"] = excerpts
     return mask, df
@@ -174,26 +166,12 @@ def region_country_mask(df: pd.DataFrame, regions_sel, countries_sel):
     return mask
 
 def dedupe_by_project(df: pd.DataFrame):
-    """De-duplicate by Ultimate_ProjectId. Preference:
-       1) Highest stage rank (as per STAGE_ORDER)
-       2) Most recent Last_Update
-       3) Max Project_Value_USDm
-    """
     if "Ultimate_ProjectId" not in df.columns:
         return df
-
     d = df.copy()
-    # rank columns
-    if "Project_Stage" in d.columns:
-        d["_stage_rank"] = d["Project_Stage"].map(lambda x: STAGE_RANK.get(str(x), -1))
-    else:
-        d["_stage_rank"] = -1
-    if "Last_Update" not in d.columns:
-        d["Last_Update"] = pd.NaT
-    if "Project_Value_USDm" not in d.columns:
-        d["Project_Value_USDm"] = np.nan
-
-    # sort by preference (desc rank, desc date, desc value) and keep first per project
+    d["_stage_rank"] = d.get("Project_Stage", pd.Series([""]*len(d))).map(lambda x: STAGE_RANK.get(str(x), -1))
+    if "Last_Update" not in d.columns: d["Last_Update"] = pd.NaT
+    if "Project_Value_USDm" not in d.columns: d["Project_Value_USDm"] = np.nan
     d = d.sort_values(by=["Ultimate_ProjectId","_stage_rank","Last_Update","Project_Value_USDm"],
                       ascending=[True, False, False, False])
     d = d.drop_duplicates(subset=["Ultimate_ProjectId"], keep="first")
@@ -209,7 +187,7 @@ def safe_groupby(df, by, metrics):
         agg = agg.sort_values(by=cnt_like, ascending=False)
     return agg
 
-def make_download(df: pd.DataFrame, filename: str, label="Download CSV"):
+def make_download(df: pd.DataFrame, filename: str, label="⬇️ Download CSV"):
     if df is None or df.empty:
         return
     csv = df.to_csv(index=False).encode("utf-8")
@@ -227,23 +205,20 @@ def parse_ids(raw: str):
             pass
     return ids
 
-
+# ---- Lödige scoring helpers ----
 def lodige_relevancy_block(text: str):
-    """Return (category_hits, raw_hits, first_excerpt)."""
     if not isinstance(text, str) or not text:
         return {}, 0, ""
     cat_hits = {}
     total = 0
     first_excerpt = ""
     lower = text.lower()
-
     for cat, patterns in LODIGE_KEYWORDS.items():
         count_cat = 0
         for pat in patterns:
             m = re.search(pat, lower, flags=re.I)
             if m:
-                count_cat += 1
-                total += 1
+                count_cat += 1; total += 1
                 if not first_excerpt:
                     s = max(0, m.start()-50); e = min(len(text), m.end()+80)
                     first_excerpt = text[s:e].replace("\n", " ")
@@ -252,46 +227,77 @@ def lodige_relevancy_block(text: str):
     return cat_hits, total, first_excerpt
 
 def lodige_score_row(row: pd.Series):
-    """Compute a 0–100 relevancy score and reasons."""
     text_cols = [c for c in [
         "Project_Attributes","Project_Scope","Project_Overview","Project_Background",
         "Project_Name","Secondary_Sector","Primary_Sector_Level_2","Primary_Sector"
     ] if c in row.index]
-
-    agg_hits = {}
-    raw_hits = 0
-    excerpt = ""
-    fields = []
+    agg_hits = {}; raw_hits = 0; excerpt = ""; fields = []
     for c in text_cols:
         cat_hits, hits, ex = lodige_relevancy_block(str(row.get(c, "")))
         if hits:
-            fields.append(c)
-            raw_hits += hits
+            fields.append(c); raw_hits += hits
             for k,v in cat_hits.items():
                 agg_hits[k] = agg_hits.get(k, 0) + v
             if not excerpt and ex:
                 excerpt = ex
-
-    # Base score from matched categories (cap + sqrt dampening)
     cat_count = len(agg_hits)
-    base = min(100, 18 * cat_count + 6 * np.sqrt(max(raw_hits-1, 0)))
-
-    # Stage weight
+    base = min(100, 18*cat_count + 6*np.sqrt(max(raw_hits-1, 0)))
     stage = str(row.get("Project_Stage", "")).strip()
-    stage_w = LODIGE_STAGE_WEIGHT.get(stage, 0.6)  # default 0.6 if unknown
+    stage_w = LODIGE_STAGE_WEIGHT.get(stage, 0.6)
+    air_bonus = 8 if "air cargo" in (
+        (str(row.get("Primary_Sector","")) + " " +
+         str(row.get("Primary_Sector_Level_2","")) + " " +
+         str(row.get("Secondary_Sector",""))).lower()
+    ) else 0
+    score = float(np.clip(base * stage_w + air_bonus, 0, 100))
+    return round(score, 1), "; ".join(sorted(agg_hits.keys())), ", ".join(fields), excerpt
 
-    # “Air Cargo” sanity bonus if already filtered for air cargo (usually true)
-    air_bonus = 8 if "air cargo" in (str(row.get("Primary_Sector","")).lower() + " " +
-                                     str(row.get("Primary_Sector_Level_2","")).lower() + " " +
-                                     str(row.get("Secondary_Sector","")).lower()) else 0
+def rank_for_preview(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    d["_stage_rank"] = d.get("Project_Stage", pd.Series([""]*len(d))).map(lambda x: STAGE_RANK.get(str(x), -1))
+    if "Lodige_Score" not in d.columns: d["Lodige_Score"] = np.nan
+    if "Last_Update" not in d.columns: d["Last_Update"] = pd.NaT
+    if "Project_Value_USDm" not in d.columns: d["Project_Value_USDm"] = np.nan
+    d = d.sort_values(
+        by=["Lodige_Score","_stage_rank","Last_Update","Project_Value_USDm"],
+        ascending=[False, True, False, False]
+    )
+    return d.drop(columns=["_stage_rank"], errors="ignore")
 
-    score = np.clip(base * stage_w + air_bonus, 0, 100)
+def download_xlsx(df: pd.DataFrame, filename: str, label="⬇️ Download Excel"):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="TopN")
+    st.download_button(label, buf.getvalue(), file_name=filename,
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    return float(score), "; ".join(sorted(agg_hits.keys())), ", ".join(fields), excerpt
-
+# ---- Contextual Quick Slices ----
+def quick_slices(df_src: pd.DataFrame, title="Quick relevancy slices", height=250):
+    st.markdown("---")
+    st.markdown(f"### {title}")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if {"Region","Country","Project_Stage","Ultimate_ProjectId"}.issubset(df_src.columns):
+            gb = (df_src.groupby(["Region","Country","Project_Stage"])
+                        ["Ultimate_ProjectId"].nunique()
+                        .reset_index()
+                        .sort_values("Ultimate_ProjectId", ascending=False))
+            st.dataframe(gb, use_container_width=True, height=height)
+    with c2:
+        if {"Region","Country","Project_Value_USDm"}.issubset(df_src.columns):
+            gb2 = (df_src.groupby(["Region","Country"])["Project_Value_USDm"]
+                      .sum().reset_index()
+                      .sort_values("Project_Value_USDm", ascending=False))
+            st.dataframe(gb2, use_container_width=True, height=height)
+    with c3:
+        if {"Latest_Momentum_Score","Project_Stage"}.issubset(df_src.columns):
+            gb3 = (df_src.groupby("Project_Stage")["Latest_Momentum_Score"]
+                      .mean().reset_index()
+                      .sort_values("Latest_Momentum_Score", ascending=False))
+            st.dataframe(gb3, use_container_width=True, height=height)
 
 # ---------------------------- Sidebar ----------------------------
-st.sidebar.title("Controls")
+st.sidebar.title("⚙️ Controls")
 
 uploaded = st.sidebar.file_uploader("Upload GlobalData export (CSV/XLSX)", type=["csv","xlsx","xls"])
 
@@ -299,7 +305,7 @@ regions_sel = st.sidebar.multiselect(
     "Regions to include",
     default=sorted(EUROPE_REGION_ALIASES | ASIA_REGION_ALIASES),
     options=sorted(EUROPE_REGION_ALIASES | ASIA_REGION_ALIASES | MEA_REGION_ALIASES),
-    help="Europe & Asia included by default. MEA Arab countries are force-included via country list."
+    help="Europe & Asia by default. MEA Arab countries are force-included via the list below."
 )
 
 countries_sel = st.sidebar.multiselect(
@@ -312,10 +318,7 @@ keywords = st.sidebar.text_input("Extra keyword (optional)", value="", help="Nar
 
 min_value, max_value = st.sidebar.slider("Project value (US$ m)", 0, 100000, (0, 100000), step=50)
 
-stage_options = [
-    "Announced","Study","Planning","Pre-Design","Design","Pre-Tender","Tender","EPC Award",
-    "Execution","Renovation","On Hold","Completed","Canceled","Parent","Sub","Sub-Sub"
-]
+stage_options = STAGE_ORDER
 stage_filter = st.sidebar.multiselect("Project stages to include (empty = all)", options=stage_options)
 
 on_radar_ids_text = st.sidebar.text_area(
@@ -324,10 +327,9 @@ on_radar_ids_text = st.sidebar.text_area(
     help="Comma/space/newline separated"
 )
 
-
-# Notes persistence (session) + import/export
+# Notes persistence
 st.sidebar.markdown("---")
-st.sidebar.caption("Notes for projects")
+st.sidebar.caption("📝 Notes for projects")
 notes_upload = st.sidebar.file_uploader("Import notes CSV (Ultimate_ProjectId,Notes)", type=["csv"], key="notes_upload")
 if "notes_map" not in st.session_state:
     st.session_state.notes_map = {}
@@ -370,20 +372,7 @@ if "Ultimate_ProjectId" in df_f.columns:
 else:
     df_f["On_Radar"] = False
 
-# Lödige relevancy computations
-lodige_cols = ["Lodige_Score","Lodige_Categories","Lodige_Match_Fields","Lodige_Excerpt"]
-for c in lodige_cols:
-    if c not in df_f.columns:
-        df_f[c] = None
-
-df_f[lodige_cols] = df_f.apply(
-    lambda r: pd.Series(lodige_score_row(r)),
-    axis=1
-)
-df_f["Lodige_Score"] = df_f["Lodige_Score"].astype(float).round(1)
-
-
-# ---------------------------- Top KPIs ----------------------------
+# KPIs
 left, mid, right = st.columns(3)
 with left:
     st.metric("Projects (filtered)", f"{len(df_f):,}")
@@ -397,12 +386,14 @@ st.caption("Matches columns are visible in **Match_Fields**; quick snippet in **
 
 # ---------------------------- Tabs ----------------------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "Group-by Explorer", "Map", "Time & Stages",
-    "Owners / Funding", "Table, Notes & Export",
-    "Match Details", "Lödige Relevancy"
+    "📊 Group-by Explorer",
+    "🗺️ Map",
+    "📈 Time & Stages",
+    "🏗️ Owners / Funding",
+    "📃 Table, Notes & Export",
+    "ℹ️ Match Details",
+    "🧭 Lödige Relevancy"
 ])
-
-
 
 # ---- Tab 1: Group-by Explorer ----
 with tab1:
@@ -426,6 +417,9 @@ with tab1:
     custom = safe_groupby(df_f, by_custom, {metric_target: metric_fn})
     st.dataframe(custom, use_container_width=True)
     make_download(custom, "custom_groupby.csv")
+
+    # Contextual slices for Tab 1
+    quick_slices(df_f, title="Quick relevancy slices (current filters)")
 
 # ---- Tab 2: Map ----
 with tab2:
@@ -517,26 +511,24 @@ with tab5:
                                      "Match_Fields","Match_Excerpt","Notes"] if c in df_f.columns]
     show_cols = st.multiselect("Columns to display", options=list(df_f.columns), default=base_default_cols)
 
-    # Editable notes using data_editor
+    # Editable table with notes
     edit_df = st.data_editor(df_f[show_cols], use_container_width=True, height=520, key="edit_table")
 
     # Persist edited notes back into session
     if "Ultimate_ProjectId" in edit_df.columns and "Notes" in edit_df.columns:
         for _, r in edit_df[["Ultimate_ProjectId","Notes"]].iterrows():
-            pid = r["Ultimate_ProjectId"]
-            note = r["Notes"]
+            pid = r["Ultimate_ProjectId"]; note = r["Notes"]
             if pd.notna(pid):
                 st.session_state.notes_map[int(pid)] = str(note) if pd.notna(note) else ""
 
     colA, colB = st.columns(2)
     with colA:
-        make_download(edit_df, "filtered_air_cargo_projects.csv", label="Download filtered table (with notes)")
+        make_download(edit_df, "filtered_air_cargo_projects.csv", label="⬇️ Download filtered table (with notes)")
     with colB:
-        # Export notes only
         if "Ultimate_ProjectId" in edit_df.columns:
             notes_only = edit_df[["Ultimate_ProjectId","Notes"]].copy()
             notes_only = notes_only[notes_only["Notes"].astype(str).str.len() > 0]
-            make_download(notes_only, "project_notes.csv", label="Download notes only")
+            make_download(notes_only, "project_notes.csv", label="⬇️ Download notes only")
 
 # ---- Tab 6: Match Details ----
 with tab6:
@@ -549,10 +541,17 @@ with tab6:
         st.markdown("**Match Excerpts**")
         st.dataframe(df_f[["Ultimate_ProjectId","Project_Name","Match_Excerpt"]], use_container_width=True, height=360)
 
+# ---- Tab 7: Lödige Relevancy ----
 with tab7:
     st.subheader("Lödige Industries Relevancy")
 
-    # Top candidates
+    # Compute score if not present
+    lodige_cols = ["Lodige_Score","Lodige_Categories","Lodige_Match_Fields","Lodige_Excerpt"]
+    if not set(lodige_cols).issubset(df_f.columns):
+        df_f[lodige_cols] = df_f.apply(lambda r: pd.Series(lodige_score_row(r)), axis=1)
+        df_f["Lodige_Score"] = df_f["Lodige_Score"].astype(float).round(1)
+
+    # Top candidates table
     topN = st.slider("Show top N candidates", 10, 200, 50, step=10)
     shortlist_cols = [c for c in [
         "Ultimate_ProjectId","Project_Name","Region","Country","City",
@@ -573,7 +572,6 @@ with tab7:
                 y=alt.Y("count()", title="Projects")
             ).properties(height=280)
             st.altair_chart(chart, use_container_width=True)
-
     with c2:
         st.markdown("**Score by stage**")
         if {"Lodige_Score","Project_Stage"}.issubset(df_f.columns):
@@ -584,7 +582,7 @@ with tab7:
             ).properties(height=280)
             st.altair_chart(chart, use_container_width=True)
 
-    # Category heatmap
+    # Category heat
     st.markdown("**Which product families are being signalled?**")
     cat_counts = (
         df_f.assign(_cats=df_f["Lodige_Categories"].fillna(""))
@@ -606,29 +604,14 @@ with tab7:
         st.altair_chart(chart, use_container_width=True)
         st.dataframe(heat.sort_values("Projects", ascending=False), use_container_width=True, height=280)
 
-    # Filters and export
+    # Filters & export
     min_score = st.slider("Minimum Lödige score to include", 0, 100, 60, step=5)
-    exp = df_f[df_f["Lodige_Score"] >= min_score][shortlist_cols]
+    exp_df = df_f[df_f["Lodige_Score"] >= min_score]
     st.markdown(f"**Exportable shortlist ≥ {min_score}**")
+    exp_cols = [c for c in shortlist_cols if c in exp_df.columns]
+    exp = exp_df[exp_cols].copy()
     st.dataframe(exp, use_container_width=True, height=300)
-    make_download(exp, f"lodige_shortlist_min{min_score}.csv", label="Download shortlist CSV")
+    make_download(exp, f"lodige_shortlist_min{min_score}.csv", label="⬇️ Download shortlist CSV")
 
-# ---------------------------- Quick Slices at Bottom ----------------------------
-st.markdown("---")
-st.markdown("### Quick relevancy slices")
-c1, c2, c3 = st.columns(3)
-with c1:
-    if {"Region","Country","Project_Stage"}.issubset(df_f.columns):
-        gb = df_f.groupby(["Region","Country","Project_Stage"])["Ultimate_ProjectId"].nunique().reset_index().sort_values("Ultimate_ProjectId", ascending=False)
-        st.dataframe(gb, use_container_width=True, height=250)
-with c2:
-    if {"Region","Country","Project_Value_USDm"}.issubset(df_f.columns):
-        gb2 = df_f.groupby(["Region","Country"])["Project_Value_USDm"].sum().reset_index().sort_values("Project_Value_USDm", ascending=False)
-        st.dataframe(gb2, use_container_width=True, height=250)
-with c3:
-    if {"Latest_Momentum_Score","Project_Stage"}.issubset(df_f.columns):
-        gb3 = df_f.groupby("Project_Stage")["Latest_Momentum_Score"].mean().reset_index().sort_values("Latest_Momentum_Score", ascending=False)
-        st.dataframe(gb3, use_container_width=True, height=250)
-
-
-st.caption("Use Region→Country→Stage to validate coverage, then filter by On-Radar and annotate Notes for follow-ups.")
+    # Contextual slices for Tab 7 (use the min-score filtered view)
+    quick_slices(exp_df, title=f"Slices (Lödige score ≥ {min_score})")
