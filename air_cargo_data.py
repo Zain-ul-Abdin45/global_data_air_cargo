@@ -434,96 +434,134 @@ with tab2:
         st.info("Latitude/Longitude not found in file.")
 
 # ---- Tab 3: Time & Stages ----
-# ---- Tab 3: Time & Stages ----
 with tab3:
-    st.subheader("Projects over time — by announcement, start, and completion")
+    st.subheader("Projects over time — announcement, start, completion")
 
-    # ---- controls for this tab
+    # -------- Controls --------
     metric_choice = st.radio(
         "Metric", ["Projects (count)", "Total Value (US$ m)"],
         horizontal=True, index=0
     )
     stack_by = st.selectbox(
-        "Stack by (optional)",
+        "Stack by",
         ["None", "Project_Stage", "Region"],
         index=1 if "Project_Stage" in df_f.columns else 0,
-        help="Stack bars to see distribution by Stage or Region."
+        help="Add color stacks to see distribution by Stage or Region."
     )
+    layout_mode = st.radio(
+        "Layout",
+        ["3 columns", "2 columns + 1 full width", "Stacked (full width)"],
+        horizontal=True, index=0
+    )
+    chart_height = st.slider("Chart height (px)", 240, 600, 360, step=20)
+    fixed_width_on = st.checkbox("Use fixed width (ignore container width)?", value=False)
+    fixed_width_px = st.slider("Fixed width (px)", 800, 1800, 1200, step=50, disabled=not fixed_width_on)
+    enable_x_zoom = st.checkbox("Enable x-axis zoom/pan", value=True)
 
-    # Helper: build a tidy per-year dataframe for the selected metric
-    def _year_pivot(df, year_col, stack_dim=None):
-        d = df.copy()
-        if year_col not in d.columns:
+    # Optional year filters (applies to all three)
+    with st.expander("Year range filter (optional)"):
+        # Find global min/max across the three year columns
+        years = pd.Series(dtype="Int64")
+        for col in ["Announcement_Year", "Start_Year", "End_Year"]:
+            if col in df_f.columns:
+                years = pd.concat([years, df_f[col].dropna().astype("Int64")])
+        if not years.empty:
+            yr_min, yr_max = int(years.min()), int(years.max())
+            sel_min, sel_max = st.slider("Year range", yr_min, yr_max, (yr_min, yr_max), step=1)
+        else:
+            sel_min, sel_max = None, None
+            st.info("No year information available to filter.")
+
+    # -------- Helpers --------
+    def _year_pivot(df, year_col, stack_dim):
+        """Return tidy [year, (stack_dim,) Metric] for count/value, honoring year filter."""
+        if year_col not in df.columns:
             return pd.DataFrame(columns=[year_col, "Metric"] + ([stack_dim] if stack_dim else []))
-        d = d.dropna(subset=[year_col])
-        d[year_col] = d[year_col].astype("Int64")
-        if d.empty:
-            return d[[year_col]]
 
+        d = df.dropna(subset=[year_col]).copy()
+        d[year_col] = d[year_col].astype("Int64")
+
+        # Apply year range filter
+        if sel_min is not None and sel_max is not None:
+            d = d[(d[year_col] >= sel_min) & (d[year_col] <= sel_max)]
+
+        if d.empty:
+            return d
+
+        # Metric
         if metric_choice.startswith("Projects"):
             if stack_dim and stack_dim in d.columns:
                 g = d.groupby([year_col, stack_dim])["Ultimate_ProjectId"].nunique().reset_index(name="Metric")
             else:
                 g = d.groupby([year_col])["Ultimate_ProjectId"].nunique().reset_index(name="Metric")
         else:
-            # Total Value
             if "Project_Value_USDm" not in d.columns:
                 d["Project_Value_USDm"] = np.nan
             if stack_dim and stack_dim in d.columns:
                 g = d.groupby([year_col, stack_dim])["Project_Value_USDm"].sum().reset_index(name="Metric")
             else:
                 g = d.groupby([year_col])["Project_Value_USDm"].sum().reset_index(name="Metric")
+
         return g.sort_values(year_col)
 
-    # Build three datasets
-    stack_dim = None if stack_by == "None" else stack_by
-    ann_df = _year_pivot(df_f, "Announcement_Year", stack_dim)
-    start_df = _year_pivot(df_f, "Start_Year", stack_dim)
-    end_df = _year_pivot(df_f, "End_Year", stack_dim)
-
-    # Helper: chart builder
     def _year_chart(tdf, year_col, title):
+        """Build and render an Altair bar chart using page width or fixed width."""
         if tdf is None or tdf.empty or year_col not in tdf.columns:
             st.info(f"No data for {title.lower()}.")
             return
-        if stack_dim and stack_dim in tdf.columns:
-            ch = (
-                alt.Chart(tdf)
-                .mark_bar()
-                .encode(
-                    x=alt.X(f"{year_col}:O", title="Year"),
-                    y=alt.Y("Metric:Q", title=metric_choice),
-                    color=alt.Color(f"{stack_dim}:N", title=stack_dim),
-                    tooltip=list(tdf.columns)
-                )
-                .properties(height=300, title=title)
-            )
-        else:
-            ch = (
-                alt.Chart(tdf)
-                .mark_bar()
-                .encode(
-                    x=alt.X(f"{year_col}:O", title="Year"),
-                    y=alt.Y("Metric:Q", title=metric_choice),
-                    tooltip=list(tdf.columns)
-                )
-                .properties(height=300, title=title)
-            )
-        st.altair_chart(ch, use_container_width=True)
 
-    # Layout: three columns on wide screens, two rows on narrow automatically
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        _year_chart(ann_df, "Announcement_Year", "Announcement Year (pipeline creation)")
-    with c2:
-        _year_chart(start_df, "Start_Year", "Construction Start Year (execution ramp)")
-    with c3:
+        stack_dim = None if stack_by == "None" else stack_by
+
+        enc = dict(
+            x=alt.X(f"{year_col}:O",
+                    title="Year",
+                    axis=alt.Axis(labelAngle=0, labelOverlap=True, labelLimit=140)),
+            y=alt.Y("Metric:Q", title=metric_choice),
+            tooltip=list(tdf.columns)
+        )
+        if stack_dim and stack_dim in tdf.columns:
+            enc["color"] = alt.Color(f"{stack_dim}:N", title=stack_dim)
+
+        ch = alt.Chart(tdf).mark_bar().encode(**enc).properties(
+            title=title,
+            height=chart_height
+        )
+
+        # Width logic
+        if fixed_width_on:
+            ch = ch.properties(width=fixed_width_px)
+            st.altair_chart(ch, use_container_width=False)
+        else:
+            st.altair_chart(ch.interactive(bind_y=False) if enable_x_zoom else ch,
+                            use_container_width=True)
+
+    # -------- Build the three datasets --------
+    stack_dim = None if stack_by == "None" else stack_by
+    ann_df  = _year_pivot(df_f, "Announcement_Year", stack_dim)
+    start_df = _year_pivot(df_f, "Start_Year", stack_dim)
+    end_df  = _year_pivot(df_f, "End_Year", stack_dim)
+
+    # -------- Layouts --------
+    if layout_mode == "3 columns":
+        c1, c2, c3 = st.columns(3)
+        with c1: _year_chart(ann_df,  "Announcement_Year", "Announcement Year (pipeline creation)")
+        with c2: _year_chart(start_df, "Start_Year",        "Construction Start Year (execution ramp)")
+        with c3: _year_chart(end_df,  "End_Year",           "Completion / End Year (deliveries)")
+
+    elif layout_mode == "2 columns + 1 full width":
+        c1, c2 = st.columns(2)
+        with c1: _year_chart(ann_df,  "Announcement_Year", "Announcement Year (pipeline creation)")
+        with c2: _year_chart(start_df, "Start_Year",        "Construction Start Year (execution ramp)")
         _year_chart(end_df, "End_Year", "Completion / End Year (deliveries)")
 
+    else:  # Stacked (full width)
+        _year_chart(ann_df,  "Announcement_Year", "Announcement Year (pipeline creation)")
+        _year_chart(start_df, "Start_Year",        "Construction Start Year (execution ramp)")
+        _year_chart(end_df,  "End_Year",           "Completion / End Year (deliveries)")
+
     st.caption(
-        "Tip: **Announcement** reflects pipeline creation; **Start** reflects near-term execution; "
-        "**End** approximates delivery timing. Use the **Stack by** control to see distribution by Stage or Region, "
-        "and switch the **Metric** to total value for commercial sizing."
+        "Announcement ≈ pipeline creation; Start ≈ execution ramp; End ≈ expected deliveries. "
+        "Use **Stack by** for mix, **Metric** to toggle count vs value, and **Layout**/**Fixed width** to control chart size."
     )
 
 # ---- Tab 4: Owners / Funding ----
