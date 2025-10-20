@@ -434,36 +434,97 @@ with tab2:
         st.info("Latitude/Longitude not found in file.")
 
 # ---- Tab 3: Time & Stages ----
+# ---- Tab 3: Time & Stages ----
 with tab3:
-    st.subheader("Stages over time")
-    if "Announcement_Year" in df_f.columns:
-        tmp = df_f.groupby("Announcement_Year")["Ultimate_ProjectId"].nunique().reset_index()
-        chart = alt.Chart(tmp.dropna()).mark_bar().encode(
-            x=alt.X("Announcement_Year:O", title="Announcement Year"),
-            y=alt.Y("Ultimate_ProjectId:Q", title="Projects")
-        ).properties(height=300)
-        st.altair_chart(chart, use_container_width=True)
-    cols = st.columns(2)
-    with cols[0]:
-        if "Project_Stage" in df_f.columns and "Region" in df_f.columns:
-            t = df_f.groupby(["Project_Stage","Region"])["Ultimate_ProjectId"].nunique().reset_index()
-            chart = alt.Chart(t).mark_bar().encode(
-                x=alt.X("Project_Stage:N", sort="-y", title="Stage"),
-                y=alt.Y("Ultimate_ProjectId:Q", title="Projects"),
-                color="Region:N",
-                tooltip=list(t.columns)
-            ).properties(height=320)
-            st.altair_chart(chart, use_container_width=True)
-    with cols[1]:
-        if "On_Radar" in df_f.columns and "Project_Stage" in df_f.columns:
-            t = df_f.groupby(["Project_Stage","On_Radar"])["Ultimate_ProjectId"].nunique().reset_index()
-            chart = alt.Chart(t).mark_bar().encode(
-                x=alt.X("Project_Stage:N", sort="-y", title="Stage"),
-                y=alt.Y("Ultimate_ProjectId:Q", title="Projects"),
-                color=alt.Color("On_Radar:N", title="On Radar?"),
-                tooltip=list(t.columns)
-            ).properties(height=320)
-            st.altair_chart(chart, use_container_width=True)
+    st.subheader("Projects over time — by announcement, start, and completion")
+
+    # ---- controls for this tab
+    metric_choice = st.radio(
+        "Metric", ["Projects (count)", "Total Value (US$ m)"],
+        horizontal=True, index=0
+    )
+    stack_by = st.selectbox(
+        "Stack by (optional)",
+        ["None", "Project_Stage", "Region"],
+        index=1 if "Project_Stage" in df_f.columns else 0,
+        help="Stack bars to see distribution by Stage or Region."
+    )
+
+    # Helper: build a tidy per-year dataframe for the selected metric
+    def _year_pivot(df, year_col, stack_dim=None):
+        d = df.copy()
+        if year_col not in d.columns:
+            return pd.DataFrame(columns=[year_col, "Metric"] + ([stack_dim] if stack_dim else []))
+        d = d.dropna(subset=[year_col])
+        d[year_col] = d[year_col].astype("Int64")
+        if d.empty:
+            return d[[year_col]]
+
+        if metric_choice.startswith("Projects"):
+            if stack_dim and stack_dim in d.columns:
+                g = d.groupby([year_col, stack_dim])["Ultimate_ProjectId"].nunique().reset_index(name="Metric")
+            else:
+                g = d.groupby([year_col])["Ultimate_ProjectId"].nunique().reset_index(name="Metric")
+        else:
+            # Total Value
+            if "Project_Value_USDm" not in d.columns:
+                d["Project_Value_USDm"] = np.nan
+            if stack_dim and stack_dim in d.columns:
+                g = d.groupby([year_col, stack_dim])["Project_Value_USDm"].sum().reset_index(name="Metric")
+            else:
+                g = d.groupby([year_col])["Project_Value_USDm"].sum().reset_index(name="Metric")
+        return g.sort_values(year_col)
+
+    # Build three datasets
+    stack_dim = None if stack_by == "None" else stack_by
+    ann_df = _year_pivot(df_f, "Announcement_Year", stack_dim)
+    start_df = _year_pivot(df_f, "Start_Year", stack_dim)
+    end_df = _year_pivot(df_f, "End_Year", stack_dim)
+
+    # Helper: chart builder
+    def _year_chart(tdf, year_col, title):
+        if tdf is None or tdf.empty or year_col not in tdf.columns:
+            st.info(f"No data for {title.lower()}.")
+            return
+        if stack_dim and stack_dim in tdf.columns:
+            ch = (
+                alt.Chart(tdf)
+                .mark_bar()
+                .encode(
+                    x=alt.X(f"{year_col}:O", title="Year"),
+                    y=alt.Y("Metric:Q", title=metric_choice),
+                    color=alt.Color(f"{stack_dim}:N", title=stack_dim),
+                    tooltip=list(tdf.columns)
+                )
+                .properties(height=300, title=title)
+            )
+        else:
+            ch = (
+                alt.Chart(tdf)
+                .mark_bar()
+                .encode(
+                    x=alt.X(f"{year_col}:O", title="Year"),
+                    y=alt.Y("Metric:Q", title=metric_choice),
+                    tooltip=list(tdf.columns)
+                )
+                .properties(height=300, title=title)
+            )
+        st.altair_chart(ch, use_container_width=True)
+
+    # Layout: three columns on wide screens, two rows on narrow automatically
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        _year_chart(ann_df, "Announcement_Year", "Announcement Year (pipeline creation)")
+    with c2:
+        _year_chart(start_df, "Start_Year", "Construction Start Year (execution ramp)")
+    with c3:
+        _year_chart(end_df, "End_Year", "Completion / End Year (deliveries)")
+
+    st.caption(
+        "Tip: **Announcement** reflects pipeline creation; **Start** reflects near-term execution; "
+        "**End** approximates delivery timing. Use the **Stack by** control to see distribution by Stage or Region, "
+        "and switch the **Metric** to total value for commercial sizing."
+    )
 
 # ---- Tab 4: Owners / Funding ----
 with tab4:
