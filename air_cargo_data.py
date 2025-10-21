@@ -65,11 +65,21 @@ LODIGE_KEYWORDS = {
     ]
 }
 
+
+# New weights
 LODIGE_STAGE_WEIGHT = {
-    "Execution": 1.0, "EPC Award": 0.95, "Tender": 0.9, "Pre-Tender": 0.85,
-    "Design": 0.8, "Pre-Design": 0.75, "Planning": 0.7, "Study": 0.6,
-    "Announced": 0.55, "Renovation": 0.8, "On Hold": 0.2, "Completed": 0.1, "Canceled": 0.0
+    "Study": 1.0, "Pre-Tender": 0.95, "Tender": 0.9, "Pre-Design": 0.85,
+    "Design": 0.8, "Planning": 0.75, "EPC Award": 0.65, "Announced": 0.7,
+    "Execution": 0.6, "Renovation": 0.8, "On-Hold": 0.2, "Completed": 0.1, "Canceled": 0.0
 }
+
+
+
+#LODIGE_STAGE_WEIGHT = {
+#    "Execution": 1.0, "EPC Award": 0.95, "Tender": 0.9, "Pre-Tender": 0.85,
+#    "Design": 0.8, "Pre-Design": 0.75, "Planning": 0.7, "Study": 0.6,
+#    "Announced": 0.55, "Renovation": 0.8, "On Hold": 0.2, "Completed": 0.1, "Canceled": 0.0
+#}
 
 # ---------------------------- Helpers ----------------------------
 def load_df(uploaded):
