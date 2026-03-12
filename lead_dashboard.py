@@ -305,7 +305,14 @@ dm_pct      = round(dm_count / unique_n * 100) if unique_n else 0
 countries_n = df_unique["Country"].nunique()
 companies_n = df_unique["Company"].nunique() if "Company" in df_unique.columns else "—"
 
-k1, k2, k3, k4, k5, k6 = st.columns(6)
+# Year split cards only make sense on All Years view —
+# when a single year is selected they'd just repeat Unique Leads
+show_year_split = (selected_year == "All Years")
+
+if show_year_split:
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+else:
+    k1, k2, k3, k4 = st.columns(4)
 
 with k1:
     st.markdown(f"""<div class="kpi-card">
@@ -335,21 +342,23 @@ with k4:
       <div class="kpi-sub">{companies_n} companies</div>
     </div>""", unsafe_allow_html=True)
 
-with k5:
+if show_year_split:
     y2025 = len(df_unique[df_unique["Year"] == 2025])
-    st.markdown(f"""<div class="kpi-card kpi-mid">
-      <div class="kpi-val" style="color:{LODIGE_LIGHT}">{y2025}</div>
-      <div class="kpi-label">2025 Unique</div>
-      <div class="kpi-sub">Distinct contacts</div>
-    </div>""", unsafe_allow_html=True)
-
-with k6:
     y2026 = len(df_unique[df_unique["Year"] == 2026])
-    st.markdown(f"""<div class="kpi-card kpi-teal">
-      <div class="kpi-val" style="color:{LODIGE_ACCENT}">{y2026}</div>
-      <div class="kpi-label">2026 Unique</div>
-      <div class="kpi-sub">Distinct contacts</div>
-    </div>""", unsafe_allow_html=True)
+
+    with k5:
+        st.markdown(f"""<div class="kpi-card kpi-mid">
+          <div class="kpi-val" style="color:{LODIGE_LIGHT}">{y2025}</div>
+          <div class="kpi-label">2025 Unique</div>
+          <div class="kpi-sub">Distinct contacts</div>
+        </div>""", unsafe_allow_html=True)
+
+    with k6:
+        st.markdown(f"""<div class="kpi-card kpi-teal">
+          <div class="kpi-val" style="color:{LODIGE_ACCENT}">{y2026}</div>
+          <div class="kpi-label">2026 Unique</div>
+          <div class="kpi-sub">Distinct contacts</div>
+        </div>""", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
