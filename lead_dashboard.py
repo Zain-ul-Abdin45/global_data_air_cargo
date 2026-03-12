@@ -305,7 +305,7 @@ dm_pct      = round(dm_count / unique_n * 100) if unique_n else 0
 countries_n = df_unique["Country"].nunique()
 companies_n = df_unique["Company"].nunique() if "Company" in df_unique.columns else "—"
 
-k1, k2, k3, k4, k5 = st.columns(6)
+k1, k2, k3, k4, k5 = st.columns(5)
 
 with k1:
     st.markdown(f"""<div class="kpi-card">
