@@ -215,7 +215,7 @@ def load_data(file):
         df["Seniority"] = df["Job Title"].apply(classify)
 
     # Decision maker flag
-    df["Is_DM"] = df["Seniority"].isin(["C-Suite","VP","Director"])
+    df["Is_DM"] = df["Seniority"].isin(["C-Suite","VP","Director","Founder"])
 
     return df
 
