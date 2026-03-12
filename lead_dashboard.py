@@ -215,7 +215,7 @@ def load_data(file):
         df["Seniority"] = df["Job Title"].apply(classify)
 
     # Decision maker flag
-    df["Is_DM"] = df["Seniority"].isin(["C-Suite","VP","Director", "Founder"])
+    df["Is_DM"] = df["Seniority"].isin(["C-Suite","VP","Director"])
 
     return df
 
@@ -305,7 +305,7 @@ dm_pct      = round(dm_count / unique_n * 100) if unique_n else 0
 countries_n = df_unique["Country"].nunique()
 companies_n = df_unique["Company"].nunique() if "Company" in df_unique.columns else "—"
 
-k1, k2, k3, k4, k5 = st.columns(5)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 
 with k1:
     st.markdown(f"""<div class="kpi-card">
@@ -340,6 +340,14 @@ with k5:
     st.markdown(f"""<div class="kpi-card kpi-mid">
       <div class="kpi-val" style="color:{LODIGE_LIGHT}">{y2025}</div>
       <div class="kpi-label">2025 Unique</div>
+      <div class="kpi-sub">Distinct contacts</div>
+    </div>""", unsafe_allow_html=True)
+
+with k6:
+    y2026 = len(df_unique[df_unique["Year"] == 2026])
+    st.markdown(f"""<div class="kpi-card kpi-teal">
+      <div class="kpi-val" style="color:{LODIGE_ACCENT}">{y2026}</div>
+      <div class="kpi-label">2026 Unique</div>
       <div class="kpi-sub">Distinct contacts</div>
     </div>""", unsafe_allow_html=True)
 
