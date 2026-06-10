@@ -1,0 +1,80 @@
+flowchart TD
+    subgraph SOURCES["Data sources"]
+        direction TB
+        GA["Google Alerts RSS — 11 feeds"]
+        WEB["Competitor web pages\nJoloda · Alstef · Saco"]
+        TP["Trade press HTML\nACW Daily · Freight Week"]
+        PDF["PDFs — manual\nStattimes · DVZ"]
+    end
+ 
+    subgraph ENTRY["Entry points"]
+        direction TB
+        RA["run_all.py\nMaster runner"]
+        PL["pipeline.py\nMain RSS feeds"]
+        WM["web_monitor.py\nModernization + niche"]
+        TPR["trade_press_reader.py\nTrade press"]
+    end
+ 
+    subgraph PROCESSING["Processing core"]
+        direction TB
+        COL["collector.py\nFetch · strip HTML · dedup"]
+        FILT["Noise filter\nYouTube · job boards · keyword gate"]
+        CLS["classifier.py\nClaude via OpenRouter\nanthropic/claude-haiku-4-5"]
+    end
+ 
+    subgraph CONFIG["Configuration"]
+        direction TB
+        CFG["config.py\nRSS feeds · Notion fields · model"]
+        CFG2["config_addon.py\nModernization feeds · niche RSS\nTrade press URLs"]
+        ENV[".env\nANTHROPIC_API_KEY\nNOTION_TOKEN\nNOTION_DATABASE_ID"]
+    end
+ 
+    subgraph OUTPUTS["Outputs"]
+        direction TB
+        MD["md_writer.py\nLocal markdown — always runs"]
+        NW["notion_writer.py\nNotion push — optional"]
+        LOG["logging.ini\nDaily rotating log\nlogs/YYYY-MM-DD_lodige_intel.log"]
+    end
+ 
+    subgraph FILES["output/ files"]
+        direction TB
+        F1["YYYY-MM-DD_lodige_intel.md\nAll competitor signals"]
+        F2["YYYY-MM-DD_modernization.md\nLödige + lift competitors"]
+        F3["YYYY-MM-DD_niche_competitors.md\nJoloda · Alstef · Saco"]
+        F4["YYYY-MM-DD_trade_press.md\nTopic maps + manual list"]
+    end
+ 
+    RA --> PL & WM & TPR
+ 
+    GA -->|"T1-Lifts: KONE · Schindler · TKE\nT2-AirCargo: Pteris · Beumer\nDaifuku · Vanderlande"| PL
+    GA -->|"Modernization: Lödige · KONE\nSchindler · TKE"| WM
+    GA -->|"Niche RSS: Joloda · Alstef · Saco"| WM
+    WEB -->|"Fallback if RSS empty"| WM
+    TP --> TPR
+    PDF -->|"Manual — upload to Claude"| TPR
+ 
+    PL --> COL
+    WM --> COL
+    COL --> FILT
+    FILT --> CLS
+    TPR --> CLS
+ 
+    CLS -->|"Competitor signals\nJSON classification"| MD
+    CLS -->|"Topic maps\nInterviews vs articles"| MD
+    CLS --> NW
+    CLS --> LOG
+ 
+    MD --> F1 & F2 & F3 & F4
+    NW -->|"404 — pending\ndatabase ID fix"| NOTION[("Notion\nSignal Inbox")]
+ 
+    ENV --> CFG & CFG2
+    CFG --> PL & WM & TPR
+    CFG2 --> WM & TPR
+ 
+    style SOURCES fill:#E1F5EE,stroke:#0F6E56,color:#085041
+    style ENTRY fill:#E6F1FB,stroke:#185FA5,color:#0C447C
+    style PROCESSING fill:#EEEDFE,stroke:#534AB7,color:#3C3489
+    style CONFIG fill:#F1EFE8,stroke:#5F5E5A,color:#444441
+    style OUTPUTS fill:#FAEEDA,stroke:#854F0B,color:#633806
+    style FILES fill:#EAF3DE,stroke:#3B6D11,color:#27500A
+    style NOTION fill:#FAEEDA,stroke:#854F0B,color:#633806
